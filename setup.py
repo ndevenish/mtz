@@ -5,4 +5,5 @@ setup(name='mtz',
       description='Simple mtz-reading library',
       author='Nicholas Devenish',
       author_email='ndevenish@gmail.com',
+      package_dir={'': 'src'},
       packages=['mtz'])
