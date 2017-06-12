@@ -86,6 +86,8 @@ def _parse_record(raw_data):
     return HeaderRecord(keyword, _map_types(vals, [str, str, str, hex_int, int]))
   elif keyword == "END":
     return HeaderRecord(keyword, None)
+  elif keyword == "MTZHIST":
+    return HeaderRecord(keyword, int(data.strip()))
   else:
     raise IOError("Unrecognised column type " + keyword)
 
@@ -104,6 +106,7 @@ class MTZFile(object):
 
     self.header = self._read_header((header_position-1)*4)
 
+
   def _read_header(self, position):
     self.stream.seek(position)
     header_records = []
@@ -114,4 +117,12 @@ class MTZFile(object):
         break
       header_records.append(record)
 
+    # Read the next entry
+    postheader = _parse_record(self.stream.read(80).decode("ascii"))
+    if postheader.keyword == "MTZHIST":
+      history = [self.stream.read(80).decode("ascii").strip() for x in range(postheader.data)]
+
+    print header_records
+    print history
     return header_records 
+
