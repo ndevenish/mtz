@@ -11,7 +11,6 @@ class file_reader(object):
     return self.stream.tell()
 
   def seek(self, offset, from_what=0):
-    print("Seeking to ", offset)
     self.stream.seek(offset, from_what)
 
   def close(self):

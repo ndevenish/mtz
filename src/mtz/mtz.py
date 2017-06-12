@@ -6,15 +6,25 @@ from collections import namedtuple
 HeaderRecord = namedtuple("HeaderRecord", ["keyword", "data"])
 
 def _map_types(string, type_list):
-  parts = shlex.split(string)
+  if isinstance(string, basestring):
+    parts = shlex.split(string)
+  else:
+    parts = string
   assert len(parts) == len(type_list)
   converted = tuple([x(y) for x, y in zip(type_list, parts)])
   return converted
 
+def split_length(string, lengths):
+  parts = []
+  pos = 0
+  for length in lengths:
+    parts.append(string[pos:pos+length].strip())
+    pos += length
+  return parts
 
-def _parse_record(data):
-  keyword = data[:data.find(" ")]
-  data = data[len(keyword)+1:].strip()
+def _parse_record(raw_data):
+  keyword = raw_data[:raw_data.find(" ")]
+  data = raw_data[len(keyword)+1:]
 
   if keyword == "VERS":
     return HeaderRecord(keyword, data)
@@ -66,6 +76,16 @@ def _parse_record(data):
     return HeaderRecord(keyword, _map_types(data, [int, float]))  
   elif keyword == "BATCH":
     return HeaderRecord(keyword, _map_types(data, [int]))  
+  elif keyword == "COLSRC":
+    vals = data[:30].strip(), data[31:67].strip(), int(data[66:])
+    return HeaderRecord(keyword, vals)
+  elif keyword == "COLGRP":
+    # COLGRP %-30s %-30s %-4s %1X %4d"
+    vals = split_length(data, [31, 31, 5, 2, 4])
+    hex_int = lambda x: int(x, 16)
+    return HeaderRecord(keyword, _map_types(vals, [str, str, str, hex_int, int]))
+  elif keyword == "END":
+    return HeaderRecord(keyword, None)
   else:
     raise IOError("Unrecognised column type " + keyword)
 
@@ -93,4 +113,5 @@ class MTZFile(object):
       if record.keyword == "END":
         break
       header_records.append(record)
+
     return header_records 
