@@ -15,12 +15,34 @@ def _map_types(string, type_list):
   return converted
 
 def split_length(string, lengths):
+  """Split a string based on lengths.
+  Designed to read c-scanf-based output"""
   parts = []
   pos = 0
   for length in lengths:
     parts.append(string[pos:pos+length].strip())
     pos += length
   return parts
+
+def _parse_header(stream):
+  header_records = []
+  # Read a number of 80-character records, ending in END
+  while True:
+    record = _parse_record(stream.read(80).decode("ascii"))
+    if record.keyword == "END":
+      break
+    header_records.append(record)
+
+  # Read the next entry
+  postheader = _parse_record(stream.read(80).decode("ascii"))
+  if postheader.keyword == "MTZHIST":
+    history = [stream.read(80).decode("ascii").strip() for x in range(postheader.data)]
+
+  posthistory = _parse_record(stream.read(80).decode("ascii"))
+  assert posthistory.keyword == "MTZENDOFHEADERS"
+
+  return MTZHeader(header_records, history=history) 
+
 
 def _parse_record(raw_data):
   keyword = raw_data[:raw_data.find(" ")]
@@ -35,7 +57,7 @@ def _parse_record(raw_data):
     assert len(ints) == 3
     return HeaderRecord(keyword, ints)
   elif keyword == "CELL":
-    print("Waning: Deprecated header entry CELL")
+    # print("Warning: Deprecated header entry CELL")
     vals = tuple([float(x) for x in data.split()])
     assert len(vals) == 6
     return HeaderRecord(keyword, vals)
@@ -46,7 +68,9 @@ def _parse_record(raw_data):
   elif keyword == "SYMINF":
     parts = shlex.split(data)
     if len(parts) == 7:
-      print("Warning: Using undescribed SYMINF format")
+ #       sprintf(hdrrec,"SYMINF %3d %2d %c %5d %22s %5s %c",mtz->mtzsymm.nsym,
+ # 2713           mtz->mtzsymm.nsymp,mtz->mtzsymm.symtyp,mtz->mtzsymm.spcgrp,spgname,
+ # 2714           mtz->mtzsymm.pgname,mtz->mtzsymm.spg_confidence);
       vals = _map_types(data, [int, int, str, int, str, str, str])
     else:  
       vals = _map_types(data, [int, int, str, int, str, str])
@@ -88,9 +112,16 @@ def _parse_record(raw_data):
     return HeaderRecord(keyword, None)
   elif keyword == "MTZHIST":
     return HeaderRecord(keyword, int(data.strip()))
+  elif keyword == "MTZENDOFHEADERS":
+    return HeaderRecord(keyword, None)
   else:
     raise IOError("Unrecognised column type " + keyword)
 
+
+class MTZHeader(object):
+  def __init__(self, raw_records, history=[]):
+    self.raw_records = raw_records
+    self.history = history
 
 class MTZFile(object):
   def __init__(self, filename):
@@ -104,25 +135,5 @@ class MTZFile(object):
     number_format = self.stream.read(4)
     assert number_format == b'\x44\x41\x00\x00'
 
-    self.header = self._read_header((header_position-1)*4)
-
-
-  def _read_header(self, position):
-    self.stream.seek(position)
-    header_records = []
-    # Read a number of 80-character records, ending in END
-    while True:
-      record = _parse_record(self.stream.read(80).decode("ascii"))
-      if record.keyword == "END":
-        break
-      header_records.append(record)
-
-    # Read the next entry
-    postheader = _parse_record(self.stream.read(80).decode("ascii"))
-    if postheader.keyword == "MTZHIST":
-      history = [self.stream.read(80).decode("ascii").strip() for x in range(postheader.data)]
-
-    print header_records
-    print history
-    return header_records 
-
+    self.stream.seek((header_position-1)*4)
+    self.header = _parse_header(self.stream)
