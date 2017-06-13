@@ -1,4 +1,7 @@
 
+
+from enum import Enum
+
 import shlex
 from .io import file_reader
 from collections import namedtuple
@@ -7,6 +10,43 @@ import itertools
 from pprint import pprint
 
 HeaderRecord = namedtuple("HeaderRecord", ["keyword", "data"])
+
+class DataType(Enum):
+  """Data type of represented columns. Maps to:
+      H index h,k,l
+      J intensity
+      F structure amplitude, F
+      D anomalous difference
+      Q standard deviation of J,F,D or other (but see L and M below)
+      G structure amplitude associated with one member of an hkl -h-k-l pair, F(+) or F(-)
+      L standard deviation of a column of type G
+      K intensity associated with one member of an hkl -h-k-l pair, I(+) or I(-)
+      M standard deviation of a column of type K
+      E structure amplitude divided by symmetry factor ("epsilon"). Normally scaled as well to give normalised structure factor
+      P phase angle in degrees
+      W weight (of some sort)
+      A phase probability coefficients (Hendrickson/Lattman)
+      B BATCH number
+      Y M/ISYM, packed partial/reject flag and symmetry number
+      I any other integer
+      R any other real"""
+  Index = "H"
+  Intensity = "J"
+  StructureAmplitude = "F"
+  AnomalousDifference = "D"
+  StandardDeviation  = "Q"
+  MemberStructureAmplitude = "G"
+  MSAStandardDeviation = "L"
+  IndexMemberIntensity = "K"
+  IMIStandardDeviation = "M"
+  Epsilon = "E"
+  PhaseAngle = "P"
+  Weight = "W"
+  PhaseProbabilityCoefficient = "A"
+  BatchNumber = "B"
+  MISYM = "Y"
+  Integer = "I"
+  Real = "R"
 
 def only(iterator):
   generator = (x for x in iterator)
@@ -64,7 +104,7 @@ def _parse_batch(stream):
   
   BHCH = _read_record(stream, expected="BHCH")
   
-  return MTZBatch(serial, title.data, (integers, reals), BHCH.data)
+  return Batch(serial, title.data, (integers, reals), BHCH.data)
 
 def _read_record(stream, expected=None):
   record = _parse_record(stream.read(80).decode("ascii"))
@@ -108,7 +148,10 @@ def _parse_header(stream):
   # At this point, we can discard the header batch entries
   header_records = [x for x in header_records if x.keyword != "BATCH"]
 
-  return MTZHeader(header_records, history=history, batches=batches) 
+  if ncols != len([x for x in header_records if x.keyword in ("COL", "COLUMN")]):
+    raise InconsistentHeaderError("Column entries in header do not match column count")
+
+  return Header(header_records, history=history, batches=batches) 
 
 
 def _parse_record(raw_data):
@@ -192,18 +235,20 @@ def _parse_record(raw_data):
     raise IOError("Unrecognised column type " + keyword)
 
 
-class MTZBatch(object):
+class Batch(object):
   def __init__(self, serial, title, data, bhch):
     self.serial = serial
     self.title = title
     self.data = data
     self.bhch = bhch
 
-class MTZHeader(object):
+class Header(object):
   def __init__(self, raw_records, history=[], batches=[]):
     self.raw_records = raw_records
     self.history = history
     self.batches = batches
+
+
 
 class MTZFile(object):
   def __init__(self, filename):
@@ -219,4 +264,6 @@ class MTZFile(object):
 
     self.stream.seek((header_position-1)*4)
     self.header = _parse_header(self.stream)
+
+    print ("\n" + filename)
     pprint(self.header.raw_records)
