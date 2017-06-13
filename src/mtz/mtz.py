@@ -2,10 +2,25 @@
 import shlex
 from .io import file_reader
 from collections import namedtuple
+import itertools
 
 from pprint import pprint
 
 HeaderRecord = namedtuple("HeaderRecord", ["keyword", "data"])
+
+def only(iterator):
+  generator = (x for x in iterator)
+  try:
+    value = next(generator)
+  except StopIteration:
+    raise ValueError("No items in generator to extract")
+  try:
+    next(generator)
+  except StopIteration:
+    pass
+  else:
+    raise ValueError("More than one item in generator")
+  return value
 
 def _map_types(string, type_list):
   if isinstance(string, basestring):
@@ -29,15 +44,19 @@ def split_length(string, lengths):
 class BatchEndError(IOError):
   pass
 
+class InconsistentHeaderError(IOError):
+  pass
+
+class MTZFileError(IOError):
+  pass
+
 def _parse_batch(stream):
   """Parse a batch, or fail if we've reached the end of them"""
-  header = _parse_record(stream.read(80).decode("ascii"))
-  if header.keyword != "BH":
-    stream.seek(stream.tell()-80)
-    raise BatchEndError
+  header = _read_record(stream, expected="BH")
 
   serial, nwords, nintegers, nreals = header.data
-  title =  _parse_record(stream.read(80).decode("ascii"))
+  title = _read_record(stream, expected="TITLE")
+
   # Read the first three ints and match them
   assert nwords     == stream.read_uint4()
   assert nintegers  == stream.read_uint4()
@@ -46,42 +65,51 @@ def _parse_batch(stream):
   integers = [stream.read_uint4() for x in range(nintegers-3)]
   reals    = [stream.read_float4() for x in range(nreals)]
   
-  BHCH =  _parse_record(stream.read(80).decode("ascii"))
+  BHCH = _read_record(stream, expected="BHCH")
   
   return MTZBatch(serial, title.data, (integers, reals), BHCH.data)
 
-def _parse_batches(stream):
-  "Parses batches until parsing an individual batch fails"
-  batches = []
-  try:
-    while True:
-      batches.append(_parse_batch(stream))
-  except BatchEndError:
-    pass
-  return batches
-
+def _read_record(stream, expected=None):
+  record = _parse_record(stream.read(80).decode("ascii"))
+  if expected is not None and record.keyword != expected:
+    raise MTZFileError("Unexpected result looking for {} record".format(expected))
+  return record
+  
 def _parse_header(stream):
   header_records = []
   # Read a number of 80-character records, ending in END
   while True:
-    record = _parse_record(stream.read(80).decode("ascii"))
+    record = _read_record(stream)
     if record.keyword == "END":
       break
     header_records.append(record)
+
+
+  ncols, nrefl, nbatch = only([x for x in header_records if x.keyword == "NCOL"]).data
 
   # Read the next entry
   history = []
   batches = []
   while True:
-    data = stream.read(80)
-    postheader = _parse_record(data.decode("ascii"))
-
+    postheader = _read_record(stream)
+    
     if postheader.keyword == "MTZHIST":
       history = [stream.read(80).decode("ascii").strip() for x in range(postheader.data)]
     elif postheader.keyword == "MTZBATS":
-      batches = _parse_batches(stream)
+      batches = [_parse_batch(stream) for i in range(nbatch)]
     if postheader.keyword == "MTZENDOFHEADERS":
       break
+
+  # Consolidate header records with batch records and ensure they match
+  header_batch_entries = list(itertools.chain(*[x.data for x in header_records if x.keyword == "BATCH"]))
+  if len(header_batch_entries) != len(batches):
+    raise InconsistentHeaderError("Number of batches does not match declared header batch index count")
+  # Validate the header BATCH serial numbers match the batches BH serial
+  for entry, batch in zip(header_batch_entries, batches):
+    if not entry == batch.serial:
+      raise InconsistentHeaderError("Batch serial order does not match header batch serial order")
+  # At this point, we can discard the header batch entries
+  header_records = [x for x in header_records if x.keyword != "BATCH"]
 
   return MTZHeader(header_records, history=history, batches=batches) 
 
