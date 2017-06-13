@@ -26,3 +26,6 @@ class file_reader(object):
 
   def read_uint4(self):
     return struct.unpack(self.endian+"i", self.stream.read(4))[0]
+
+  def read_float4(self):
+    return struct.unpack(self.endian+"f", self.stream.read(4))[0]
