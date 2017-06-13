@@ -41,13 +41,10 @@ def split_length(string, lengths):
     pos += length
   return parts
 
-class BatchEndError(IOError):
-  pass
-
-class InconsistentHeaderError(IOError):
-  pass
-
 class MTZFileError(IOError):
+  pass
+
+class InconsistentHeaderError(MTZFileError):
   pass
 
 def _parse_batch(stream):
