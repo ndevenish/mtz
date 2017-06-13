@@ -10,6 +10,11 @@ import itertools
 from pprint import pprint
 
 HeaderRecord = namedtuple("HeaderRecord", ["keyword", "data"])
+Column = namedtuple("Column", ["name", "type", "range", "source", "dataset"])
+#Dataset = 
+class Dataset(namedtuple("Dataset", ["id", "name", "project", "crystal", "cell", "wavelength"])):
+  def __repr__(self):
+    return "[Dataset {}]".format(self.name)
 
 class DataType(Enum):
   """Data type of represented columns. Maps to:
@@ -48,12 +53,28 @@ class DataType(Enum):
   Integer = "I"
   Real = "R"
 
-def only(iterator):
-  generator = (x for x in iterator)
+def get_only(iterable):
+  """Returns the first and only item in an iterable.
+  Throws a ValueError otherwise."""
+  generator = (x for x in iterable)
   try:
     value = next(generator)
   except StopIteration:
     raise ValueError("No items in generator to extract")
+  try:
+    next(generator)
+  except StopIteration:
+    pass
+  else:
+    raise ValueError("More than one item in generator")
+  return value
+
+def get_only_or(iterable, default=None):
+  """Returns the first and only item in an iterable, or a default if it's empty.
+  Throws a ValueError if there is more than one item in the list."""
+  generator = (x for x in iterable)
+  value = next(generator, default)
+  # Make sure we don't have any more
   try:
     next(generator)
   except StopIteration:
@@ -122,7 +143,7 @@ def _parse_header(stream):
     header_records.append(record)
 
 
-  ncols, nrefl, nbatch = only([x for x in header_records if x.keyword == "NCOL"]).data
+  ncols, nrefl, nbatch = get_only([x for x in header_records if x.keyword == "NCOL"]).data
 
   # Read the next entry
   history = []
@@ -234,6 +255,45 @@ def _parse_record(raw_data):
   else:
     raise IOError("Unrecognised column type " + keyword)
 
+def _extract_datasets(header_records):
+  # Work out the IDs of the datasets in the file. This may not be contignuous,
+  # and may not even start at zero
+  dataset_ids = {x.data[4] for x in header_records if x.keyword in ["COL", "COLUMN"]} | \
+                {x.data[0] for x in header_records if x.keyword in ["PROJECT", "CRYSTAL", "DATASET", "DCELL", "DWAVEL"]}
+  ndatasets = get_only(x for x in header_records if x.keyword == "NDIF").data
+  if not len(dataset_ids) == ndatasets:
+    raise InconsistentHeaderError("Cannot find all defined dataset IDs")
+
+  datasets = []
+  for datasetID in dataset_ids:
+    name   = get_only_or(x for x in header_records if x.keyword == "DATASET" and x.data[0] == datasetID)
+    project = get_only_or(x for x in header_records if x.keyword == "PROJECT" and x.data[0] == datasetID)
+    crystal = get_only_or(x for x in header_records if x.keyword == "CRYSTAL" and x.data[0] == datasetID)
+    cell    = get_only_or(x for x in header_records if x.keyword == "DCELL" and x.data[0] == datasetID)
+    wavelength = get_only_or(x for x in header_records if x.keyword == "DWAVEL" and x.data[0] == datasetID)
+    datasets.append(Dataset(id=datasetID,
+                            name=name.data[1] if name else None,
+                            project=project.data[1] if project else None,
+                            crystal=crystal.data[1] if crystal else None,
+                            cell=tuple(cell.data[1:]) if cell else None,
+                            wavelength=wavelength.data[1] if wavelength else None))
+  return datasets
+
+def _extract_columns(header_records, datasets):
+  # Column = namedtuple("Column", ["index", "name", "type", "range", "source", "dataset"])
+  columns = []
+  ncolumns = get_only(x for x in header_records if x.keyword == "NCOL").data[0]
+  column_data = [x.data for x in header_records if x.keyword in ["COL", "COLUMN"]]
+  for name, coltype, minVal, maxVal, datasetID in column_data:
+    source = get_only(x for x in header_records if x.keyword == "COLSRC" and x.data[0] == name)
+    dataset = get_only(x for x in datasets if x.id == datasetID)
+    columns.append(Column(name=name,
+                          type=DataType(coltype),
+                          range=(minVal, maxVal),
+                          source=source.data[1] if source else None,
+                          dataset=dataset))
+  return columns
+
 
 class Batch(object):
   def __init__(self, serial, title, data, bhch):
@@ -241,13 +301,22 @@ class Batch(object):
     self.title = title
     self.data = data
     self.bhch = bhch
+  def __repr__(self):
+    return "<Batch {}: {} ({}/{}/{})>".format(self.serial, self.title, len(self.data[0]), len(self.data[1]), ",".join(self.bhch))
 
 class Header(object):
   def __init__(self, raw_records, history=[], batches=[]):
-    self.raw_records = raw_records
     self.history = history
     self.batches = batches
+    self.datasets = _extract_datasets(raw_records)
+    self.columns = _extract_columns(raw_records, self.datasets)
+    self.version = get_only(x for x in raw_records if x.keyword == "VERS").data
+    self.title = get_only(x for x in raw_records if x.keyword == "TITLE").data
 
+    raw_records = [x for x in raw_records if not x.keyword in {"NDIF", "PROJECT", "DCELL", "DATASET", "CRYSTAL", "DWAVEL"}]
+    raw_records = [x for x in raw_records if not x.keyword in {"COL", "COLUMN", "COLSRC"}]
+    raw_records = [x for x in raw_records if not x.keyword in {"VERS", "TITLE"}]
+    self.raw_records = raw_records
 
 
 class MTZFile(object):
@@ -267,3 +336,8 @@ class MTZFile(object):
 
     print ("\n" + filename)
     pprint(self.header.raw_records)
+    pprint(self.header.datasets)
+    pprint(self.header.batches)
+    for col in self.header.columns:
+      print(col)
+    # pprint(self.header.columns)
