@@ -1,4 +1,4 @@
-
+from __future__ import print_function
 
 from enum import Enum
 
@@ -7,7 +7,23 @@ from .io import file_reader
 from collections import namedtuple
 import itertools
 
-from pprint import pprint
+from pprint import pprint, pformat
+
+
+from operator import itemgetter
+from itertools import groupby
+
+def rangestring(data):
+  """Converts a list of integers into string range
+  e.g. [1,2,3,4,5,7,8,10,13,14,15] => "1-5,7,8,10,13-15" """
+  ranges = []
+  for key, group in groupby(enumerate(sorted(data)), lambda (i,x):i-x):
+      group = [g[1] for g in group] #map(itemgetter(1), group)
+      if len(group) > 2:
+        ranges.append("{}-{}".format(group[0], group[-1]))
+      else:
+          ranges.extend(group)
+  return ",".join(ranges)
 
 HeaderRecord = namedtuple("HeaderRecord", ["keyword", "data"])
 Column = namedtuple("Column", ["name", "type", "range", "source", "dataset"])
@@ -334,10 +350,17 @@ class MTZFile(object):
     self.stream.seek((header_position-1)*4)
     self.header = _parse_header(self.stream)
 
-    print ("\n" + filename)
-    pprint(self.header.raw_records)
-    pprint(self.header.datasets)
-    pprint(self.header.batches)
+  def __str__(self):
+    lines = []
+
+    lines.append(self.filename)
+    lines.append(pformat(self.header.raw_records))
+
+    lines.append("Batches:  {}".format(rangestring([x.serial for x in self.header.batches])))
+    lines.append("Datasets: {}".format(", ".join(x.name for x in self.header.datasets)))
+
     for col in self.header.columns:
-      print(col)
+      lines.append(str(col))
     # pprint(self.header.columns)
+    return "\n".join(lines)
+
