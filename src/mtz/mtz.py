@@ -1,6 +1,7 @@
 from __future__ import print_function
 
 from enum import Enum
+from argparse import ArgumentParser
 
 import shlex
 from .io import file_reader
@@ -18,7 +19,7 @@ def rangestring(data):
     """Converts a list of integers into string range
     e.g. [1,2,3,4,5,7,8,10,13,14,15] => "1-5,7,8,10,13-15" """
     ranges = []
-    for key, group in groupby(enumerate(sorted(data)), lambda i, x: i - x):
+    for key, group in groupby(enumerate(sorted(data)), lambda x: x[0] - x[1]):
         group = [g[1] for g in group]  # map(itemgetter(1), group)
         if len(group) > 2:
             ranges.append("{}-{}".format(group[0], group[-1]))
@@ -111,7 +112,7 @@ def get_only_or(iterable, default=None):
 
 
 def _map_types(string, type_list):
-    if isinstance(string, basestring):
+    if isinstance(string, str):
         parts = shlex.split(string)
     else:
         parts = string
@@ -246,9 +247,9 @@ def _parse_record(raw_data):
             #       sprintf(hdrrec,"SYMINF %3d %2d %c %5d %22s %5s %c",mtz->mtzsymm.nsym,
             # 2713           mtz->mtzsymm.nsymp,mtz->mtzsymm.symtyp,mtz->mtzsymm.spcgrp,spgname,
             # 2714           mtz->mtzsymm.pgname,mtz->mtzsymm.spg_confidence);
-            vals = _map_types(data, [int, int, unicode, int, unicode, unicode, unicode])
+            vals = _map_types(data, [int, int, str, int, str, str, str])
         else:
-            vals = _map_types(data, [int, int, unicode, int, unicode, unicode])
+            vals = _map_types(data, [int, int, str, int, str, str])
         return HeaderRecord(keyword, vals)
     elif keyword == "SYMM":
         return HeaderRecord(keyword, data.strip())
@@ -259,16 +260,16 @@ def _parse_record(raw_data):
     elif keyword == "VALM":
         return HeaderRecord(keyword, data.strip())
     elif keyword == "COL" or keyword == "COLUMN":
-        vals = _map_types(data, [unicode, unicode, float, float, int])
+        vals = _map_types(data, [str, str, float, float, int])
         return HeaderRecord(keyword, vals)
     elif keyword == "NDIF":
         return HeaderRecord(keyword, int(data))
     elif keyword == "PROJECT":
-        return HeaderRecord(keyword, _map_types(data, [int, unicode]))
+        return HeaderRecord(keyword, _map_types(data, [int, str]))
     elif keyword == "CRYSTAL":
-        return HeaderRecord(keyword, _map_types(data, [int, unicode]))
+        return HeaderRecord(keyword, _map_types(data, [int, str]))
     elif keyword == "DATASET":
-        return HeaderRecord(keyword, _map_types(data, [int, unicode]))
+        return HeaderRecord(keyword, _map_types(data, [int, str]))
     elif keyword == "DCELL":
         return HeaderRecord(
             keyword, _map_types(data, [int, float, float, float, float, float, float])
@@ -284,9 +285,7 @@ def _parse_record(raw_data):
         # COLGRP %-30s %-30s %-4s %1X %4d"
         vals = split_length(data, [31, 31, 5, 2, 4])
         hex_int = lambda x: int(x, 16)
-        return HeaderRecord(
-            keyword, _map_types(vals, [unicode, unicode, unicode, hex_int, int])
-        )
+        return HeaderRecord(keyword, _map_types(vals, [str, str, str, hex_int, int]))
     elif keyword == "END":
         return HeaderRecord(keyword, None)
     elif keyword == "MTZHIST":
@@ -449,3 +448,11 @@ class MTZFile(object):
             lines.append(str(col))
         # pprint(self.header.columns)
         return "\n".join(lines)
+
+
+def run():
+    parser = ArgumentParser()
+    parser.add_argument("MTZ", help="MTZ file to read")
+    args = parser.parse_args()
+    f = MTZFile(args.MTZ)
+    print(f)

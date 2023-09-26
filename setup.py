@@ -8,4 +8,9 @@ setup(
     author_email="ndevenish@gmail.com",
     package_dir={"": "src"},
     packages=["mtz"],
+    entry_points={
+        "console_scripts": [
+            "mtzshow = mtz.mtz:run",
+        ]
+    },
 )
